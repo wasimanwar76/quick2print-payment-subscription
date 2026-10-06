@@ -31,7 +31,7 @@ const CASHFREE_ENV = String(
 
 const RETURN_URL =
   process.env.SUBSCRIPTION_RETURN_URL ||
-  "https://www.quick2print.in/subscription-payment.html";
+  "https://www\.quick2print.in/subscription-payment.html";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY)
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -45,14 +45,15 @@ if (!["SANDBOX", "PRODUCTION"].includes(CASHFREE_ENV))
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: {
     autoRefreshToken: false,
+
     persistSession: false,
   },
 });
 
 const CF_BASE =
   CASHFREE_ENV === "PRODUCTION"
-    ? "https\://api.cashfree.com/pg"
-    : "https\://sandbox.cashfree.com/pg";
+    ? "https\\://api.cashfree.com/pg"
+    : "https\\://sandbox.cashfree.com/pg";
 
 const CF_HEADERS = {
   "Content-Type": "application/json",
@@ -253,7 +254,7 @@ app.post("/api/subscription/create", async (req, res) => {
 
     const subscriptionId = crypto.randomUUID();
 
-    const orderId = `Q2P_SUB\_${Date.now()}\_${crypto.randomBytes(5).toString("hex")}`;
+    const orderId = `Q2P_SUB_${Date.now()}_${crypto.randomBytes(5).toString("hex")}`;
 
     const { error: insertError } = await supabase
 
@@ -293,7 +294,7 @@ app.post("/api/subscription/create", async (req, res) => {
           order_currency: "INR",
 
           customer_details: {
-            customer_id: `SHOP\_${shopId}`,
+            customer_id: `SHOP_${shopId}`,
 
             customer_name: s.owner_name || s.shop_name || "Quick2Print Shop",
 
@@ -305,8 +306,11 @@ app.post("/api/subscription/create", async (req, res) => {
           order_meta: {
             return_url: (() => {
               const url = new URL(RETURN_URL);
+
               url.searchParams.set("subscription_id", subscriptionId);
+
               url.searchParams.set("shop_id", shopId);
+
               return url.toString();
             })(),
           },
@@ -398,6 +402,83 @@ app.post("/api/subscription/create", async (req, res) => {
   }
 });
 
+app.get("/api/subscription/:subscriptionId", async (req, res) => {
+  try {
+    const subscriptionId = text(req.params.subscriptionId);
+    if (!subscriptionId) {
+      return fail(
+        res,
+        "Subscription ID is required.",
+        "SUBSCRIPTION_ID_REQUIRED",
+        400,
+      );
+    }
+
+    const { data: sub, error } = await supabase
+      .from("shop_subscriptions")
+      .select(
+        `
+        subscription_id,
+        shop_id,
+        plan_id,
+        amount,
+        currency,
+        duration_months,
+        cashfree_order_id,
+        cashfree_payment_session_id,
+        payment_status,
+        payment_environment,
+        payment_method,
+        cashfree_payment_id,
+        started_at,
+        expires_at,
+        created_at,
+        payment_error_message
+      `,
+      )
+      .eq("subscription_id", subscriptionId)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!sub)
+      return fail(
+        res,
+        "Subscription payment was not found.",
+        "SUBSCRIPTION_NOT_FOUND",
+        404,
+      );
+
+    const { data: plan, error: planError } = await supabase
+      .from("plans")
+      .select("plan_id,name,price_inr,duration_months,duration_label")
+      .eq("plan_id", sub.plan_id)
+      .maybeSingle();
+    if (planError) throw planError;
+
+    const { data: shopData, error: shopError } = await supabase
+      .from("shops")
+      .select("shop_id,shop_name,owner_name,status")
+      .eq("shop_id", sub.shop_id)
+      .maybeSingle();
+    if (shopError) throw shopError;
+
+    return ok(res, "Subscription details loaded.", {
+      ...sub,
+      plan_name: plan?.name || sub.plan_id,
+      duration_label: plan?.duration_label || `${sub.duration_months} Months`,
+      shop_name: shopData?.shop_name || "Quick2Print Shop",
+    });
+  } catch (e) {
+    console.error("[GET SUBSCRIPTION]", e);
+    return fail(
+      res,
+      e.message || "Unable to load subscription details.",
+      "SUBSCRIPTION_LOAD_FAILED",
+      500,
+    );
+  }
+});
+
 app.post("/api/subscription/verify", async (req, res) => {
   try {
     const subscriptionId = text(req.body?.subscriptionId);
@@ -426,7 +507,7 @@ app.post("/api/subscription/verify", async (req, res) => {
 
       .from("shop_subscriptions")
 
-      .select("\*")
+      .select("\\\*")
 
       .eq("subscription_id", subscriptionId)
 
@@ -594,7 +675,7 @@ app.post("/api/subscription/verify", async (req, res) => {
 
       .neq("payment_status", "PAID")
 
-      .select("\*")
+      .select("\\\*")
 
       .maybeSingle();
 
@@ -605,7 +686,7 @@ app.post("/api/subscription/verify", async (req, res) => {
 
         .from("shop_subscriptions")
 
-        .select("\*")
+        .select("\\\*")
 
         .eq("subscription_id", subscriptionId)
 
