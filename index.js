@@ -31,7 +31,7 @@ const CASHFREE_ENV = String(
 
 const RETURN_URL =
   process.env.SUBSCRIPTION_RETURN_URL ||
-  "https://www\.quick2print.in/subscription-payment.html";
+  "https://www.quick2print.in/subscription-payment.html";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY)
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -52,8 +52,8 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 
 const CF_BASE =
   CASHFREE_ENV === "PRODUCTION"
-    ? "https\\://api.cashfree.com/pg"
-    : "https\\://sandbox.cashfree.com/pg";
+    ? "https://api.cashfree.com/pg"
+    : "https://sandbox.cashfree.com/pg";
 
 const CF_HEADERS = {
   "Content-Type": "application/json",
