@@ -29,7 +29,7 @@ const CASHFREE_ENV = String(
   process.env.CASHFREE_ENV || "SANDBOX",
 ).toUpperCase();
 
-const RETURN_URL = "https://www.quick2print.in/subscription-payment-success";
+const RETURN_URL = "https://www.quick2print.in/subscription-payment-success.html";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY)
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
