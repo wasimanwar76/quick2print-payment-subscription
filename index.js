@@ -29,9 +29,7 @@ const CASHFREE_ENV = String(
   process.env.CASHFREE_ENV || "SANDBOX",
 ).toUpperCase();
 
-const RETURN_URL =
-  process.env.SUBSCRIPTION_RETURN_URL ||
-  "https://www.quick2print.in/subscription-payment.html";
+const RETURN_URL = "https://www.quick2print.in/subscription-payment-success";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY)
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -507,7 +505,7 @@ app.post("/api/subscription/verify", async (req, res) => {
 
       .from("shop_subscriptions")
 
-      .select("\\\*")
+      .select("*")
 
       .eq("subscription_id", subscriptionId)
 
@@ -675,7 +673,7 @@ app.post("/api/subscription/verify", async (req, res) => {
 
       .neq("payment_status", "PAID")
 
-      .select("\\\*")
+      .select("*")
 
       .maybeSingle();
 
@@ -686,7 +684,7 @@ app.post("/api/subscription/verify", async (req, res) => {
 
         .from("shop_subscriptions")
 
-        .select("\\\*")
+        .select("*")
 
         .eq("subscription_id", subscriptionId)
 
