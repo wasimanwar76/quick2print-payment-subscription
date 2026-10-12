@@ -1,5 +1,3 @@
-require("dotenv").config();
-
 const express = require("express");
 
 const cors = require("cors");
@@ -29,7 +27,8 @@ const CASHFREE_ENV = String(
   process.env.CASHFREE_ENV || "SANDBOX",
 ).toUpperCase();
 
-const RETURN_URL = "https://www.quick2print.in/subscription-payment-success.html";
+const RETURN_URL =
+  "https://www.quick2print.in/subscription-payment-success.html";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY)
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -252,7 +251,7 @@ app.post("/api/subscription/create", async (req, res) => {
 
     const subscriptionId = crypto.randomUUID();
 
-    const orderId = `Q2P_SUB_${Date.now()}_${crypto.randomBytes(5).toString("hex")}`;
+    const orderId = `Q2P_SUB\_${Date.now()}\_${crypto.randomBytes(5).toString("hex")}`;
 
     const { error: insertError } = await supabase
 
@@ -292,7 +291,7 @@ app.post("/api/subscription/create", async (req, res) => {
           order_currency: "INR",
 
           customer_details: {
-            customer_id: `SHOP_${shopId}`,
+            customer_id: `SHOP\_${shopId}`,
 
             customer_name: s.owner_name || s.shop_name || "Quick2Print Shop",
 
@@ -401,8 +400,10 @@ app.post("/api/subscription/create", async (req, res) => {
 });
 
 app.get("/api/subscription/:subscriptionId", async (req, res) => {
+  const subscriptionId = text(req.params.subscriptionId);
+  const requestedShopId = text(req.query.shop_id);
+
   try {
-    const subscriptionId = text(req.params.subscriptionId);
     if (!subscriptionId) {
       return fail(
         res,
@@ -412,53 +413,80 @@ app.get("/api/subscription/:subscriptionId", async (req, res) => {
       );
     }
 
-    const { data: sub, error } = await supabase
+    console.info("[GET SUBSCRIPTION] Lookup started", {
+      subscriptionId,
+      shopIdProvided: Boolean(requestedShopId),
+    });
+
+    let query = supabase
       .from("shop_subscriptions")
       .select(
         `
-        subscription_id,
-        shop_id,
-        plan_id,
-        amount,
-        currency,
-        duration_months,
-        cashfree_order_id,
-        cashfree_payment_session_id,
-        payment_status,
-        payment_environment,
-        payment_method,
-        cashfree_payment_id,
-        started_at,
-        expires_at,
-        created_at,
+        subscription_id, shop_id, plan_id, amount, currency,
+        duration_months, cashfree_order_id, cashfree_payment_session_id,
+        cashfree_payment_id, payment_status, payment_environment,
+        payment_method, started_at, expires_at, created_at, updated_at,
         payment_error_message
       `,
       )
-      .eq("subscription_id", subscriptionId)
-      .maybeSingle();
+      .eq("subscription_id", subscriptionId);
 
-    if (error) throw error;
-    if (!sub)
+    if (requestedShopId) query = query.eq("shop_id", requestedShopId);
+
+    const { data: sub, error } = await query.maybeSingle();
+
+    if (error) {
+      console.error("[GET SUBSCRIPTION] Supabase query failed", {
+        code: error.code,
+        message: error.message,
+        subscriptionId,
+      });
       return fail(
         res,
-        "Subscription payment was not found.",
+        "Unable to load subscription details from the database.",
+        "SUBSCRIPTION_QUERY_FAILED",
+        500,
+      );
+    }
+
+    if (!sub) {
+      console.warn("[GET SUBSCRIPTION] No matching row", {
+        subscriptionId,
+        requestedShopId: requestedShopId || null,
+      });
+      return fail(
+        res,
+        "Subscription payment was not found. The subscription record may not have been created, or the website may be using a different payment API/database.",
         "SUBSCRIPTION_NOT_FOUND",
         404,
       );
+    }
 
-    const { data: plan, error: planError } = await supabase
-      .from("plans")
-      .select("plan_id,name,price_inr,duration_months,duration_label")
-      .eq("plan_id", sub.plan_id)
-      .maybeSingle();
+    const [
+      { data: plan, error: planError },
+      { data: shopData, error: shopError },
+    ] = await Promise.all([
+      supabase
+        .from("plans")
+        .select("plan_id,name,price_inr,duration_months,duration_label")
+        .eq("plan_id", sub.plan_id)
+        .maybeSingle(),
+      supabase
+        .from("shops")
+        .select("shop_id,shop_name,owner_name,status")
+        .eq("shop_id", sub.shop_id)
+        .maybeSingle(),
+    ]);
+
     if (planError) throw planError;
-
-    const { data: shopData, error: shopError } = await supabase
-      .from("shops")
-      .select("shop_id,shop_name,owner_name,status")
-      .eq("shop_id", sub.shop_id)
-      .maybeSingle();
     if (shopError) throw shopError;
+
+    console.info("[GET SUBSCRIPTION] Subscription loaded", {
+      subscriptionId: sub.subscription_id,
+      shopId: sub.shop_id,
+      status: sub.payment_status,
+      hasPaymentSession: Boolean(sub.cashfree_payment_session_id),
+    });
 
     return ok(res, "Subscription details loaded.", {
       ...sub,
@@ -467,7 +495,7 @@ app.get("/api/subscription/:subscriptionId", async (req, res) => {
       shop_name: shopData?.shop_name || "Quick2Print Shop",
     });
   } catch (e) {
-    console.error("[GET SUBSCRIPTION]", e);
+    console.error("[GET SUBSCRIPTION] Unexpected error", e);
     return fail(
       res,
       e.message || "Unable to load subscription details.",
@@ -505,7 +533,7 @@ app.post("/api/subscription/verify", async (req, res) => {
 
       .from("shop_subscriptions")
 
-      .select("*")
+      .select("\*")
 
       .eq("subscription_id", subscriptionId)
 
@@ -673,7 +701,7 @@ app.post("/api/subscription/verify", async (req, res) => {
 
       .neq("payment_status", "PAID")
 
-      .select("*")
+      .select("\*")
 
       .maybeSingle();
 
@@ -684,7 +712,7 @@ app.post("/api/subscription/verify", async (req, res) => {
 
         .from("shop_subscriptions")
 
-        .select("*")
+        .select("\*")
 
         .eq("subscription_id", subscriptionId)
 
