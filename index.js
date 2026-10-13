@@ -404,11 +404,13 @@ app.post("/api/subscription/create", async (req, res) => {
 app.get("/api/subscription/:subscriptionId", async (req, res) => {
   try {
     const subscriptionId = text(req.params.subscriptionId);
-    if (!subscriptionId) {
+    const shopId = text(req.query.shop_id);
+
+    if (!subscriptionId || !shopId) {
       return fail(
         res,
-        "Subscription ID is required.",
-        "SUBSCRIPTION_ID_REQUIRED",
+        "Subscription ID and Shop ID are required.",
+        "MISSING_SUBSCRIPTION_OR_SHOP_ID",
         400,
       );
     }
@@ -436,29 +438,39 @@ app.get("/api/subscription/:subscriptionId", async (req, res) => {
       `,
       )
       .eq("subscription_id", subscriptionId)
+      .eq("shop_id", shopId)
       .maybeSingle();
 
     if (error) throw error;
-    if (!sub)
+
+    if (!sub) {
+      console.warn("[GET SUBSCRIPTION] No matching record", {
+        subscriptionId,
+        shopId,
+      });
+
       return fail(
         res,
-        "Subscription payment was not found.",
+        "Subscription not found for this shop. Please start the subscription again from your dashboard.",
         "SUBSCRIPTION_NOT_FOUND",
         404,
       );
+    }
 
     const { data: plan, error: planError } = await supabase
       .from("plans")
-      .select("plan_id,name,price_inr,duration_months,duration_label")
+      .select("plan_id, name, price_inr, duration_months, duration_label")
       .eq("plan_id", sub.plan_id)
       .maybeSingle();
+
     if (planError) throw planError;
 
     const { data: shopData, error: shopError } = await supabase
       .from("shops")
-      .select("shop_id,shop_name,owner_name,status")
+      .select("shop_id, shop_name")
       .eq("shop_id", sub.shop_id)
       .maybeSingle();
+
     if (shopError) throw shopError;
 
     return ok(res, "Subscription details loaded.", {
@@ -467,11 +479,12 @@ app.get("/api/subscription/:subscriptionId", async (req, res) => {
       duration_label: plan?.duration_label || `${sub.duration_months} Months`,
       shop_name: shopData?.shop_name || "Quick2Print Shop",
     });
-  } catch (e) {
-    console.error("[GET SUBSCRIPTION]", e);
+  } catch (error) {
+    console.error("[GET SUBSCRIPTION]", error);
+
     return fail(
       res,
-      e.message || "Unable to load subscription details.",
+      "Unable to load subscription details.",
       "SUBSCRIPTION_LOAD_FAILED",
       500,
     );
