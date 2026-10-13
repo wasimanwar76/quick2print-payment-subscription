@@ -801,6 +801,545 @@ app.get("/api/payment/order/:orderId", async (req, res) => {
   }
 });
 
+
+// ==========================================
+// SUBSCRIPTION PAYMENT HELPERS
+// Uses public.shop_subscriptions and public.shops schemas.
+// Keep these endpoints on the same backend used by the dashboard.
+// ==========================================
+
+async function getSubscriptionShop(shopId) {
+  if (!shopId) throw new Error("Shop ID is required.");
+
+  const { data: shop, error } = await supabase
+    .from("shops")
+    .select(`
+      shop_id,
+      shop_name,
+      owner_name,
+      whatsapp_number,
+      email,
+      status,
+      plan_id,
+      subscription_status,
+      cashfree_app_id,
+      cashfree_secret_key,
+      cashfree_env
+    `)
+    .eq("shop_id", shopId)
+    .maybeSingle();
+
+  if (error) throw new Error(`Failed to load shop: ${error.message}`);
+  if (!shop) throw new Error("Shop not found.");
+  if (shop.status !== "active") throw new Error("This shop is not active.");
+
+  if (!shop.cashfree_app_id || !shop.cashfree_secret_key) {
+    throw new Error("Cashfree App ID or Secret Key is missing in public.shops.");
+  }
+
+  const environment = String(shop.cashfree_env || "SANDBOX").toUpperCase();
+  if (!["SANDBOX", "PRODUCTION"].includes(environment)) {
+    throw new Error("Invalid cashfree_env. Use SANDBOX or PRODUCTION.");
+  }
+
+  return {
+    shop,
+    environment,
+    apiUrl:
+      environment === "PRODUCTION"
+        ? "https://api.cashfree.com/pg"
+        : "https://sandbox.cashfree.com/pg",
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": shop.cashfree_app_id,
+      "x-client-secret": shop.cashfree_secret_key,
+      "x-api-version": "2023-08-01",
+    },
+  };
+}
+
+function subscriptionReturnUrl(subscriptionId, shopId) {
+  const url = new URL("https://www.quick2print.in/subscription-payment-success.html");
+  url.searchParams.set("subscription_id", subscriptionId);
+  url.searchParams.set("shop_id", shopId);
+  return url.toString();
+}
+
+function addMonths(date, months) {
+  const result = new Date(date);
+  const day = result.getUTCDate();
+  result.setUTCDate(1);
+  result.setUTCMonth(result.getUTCMonth() + months);
+  const lastDay = new Date(
+    Date.UTC(result.getUTCFullYear(), result.getUTCMonth() + 1, 0)
+  ).getUTCDate();
+  result.setUTCDate(Math.min(day, lastDay));
+  return result;
+}
+
+// ==========================================
+// SUBSCRIPTION API 1: CREATE SUBSCRIPTION + CASHFREE ORDER
+// POST /api/subscription/create { shopId, planId }
+// ==========================================
+
+app.post("/api/subscription/create", async (req, res) => {
+  let insertedSubscriptionId = null;
+
+  try {
+    const shopId = String(req.body?.shopId || req.body?.shop_id || "").trim();
+    const planId = String(req.body?.planId || req.body?.plan_id || "").trim();
+
+    if (!shopId || !planId) {
+      return res.status(400).json({
+        success: false,
+        message: "shopId and planId are required.",
+      });
+    }
+
+    const { shop, environment, apiUrl, headers } =
+      await getSubscriptionShop(shopId);
+
+    const { data: plan, error: planError } = await supabase
+      .from("plans")
+      .select("plan_id, name, price_inr, duration_months")
+      .eq("plan_id", planId)
+      .maybeSingle();
+
+    if (planError) {
+      throw new Error(`Failed to load plan: ${planError.message}`);
+    }
+    if (!plan) throw new Error("Selected plan was not found.");
+
+    const amount = Number(plan.price_inr);
+    const durationMonths = Number(plan.duration_months);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error("Selected plan must have a valid price_inr greater than zero.");
+    }
+    if (!Number.isInteger(durationMonths) || durationMonths < 1) {
+      throw new Error("Selected plan must have a valid duration_months value.");
+    }
+
+    // Insert first so the subscription UUID can be included in Cashfree's return URL.
+    const { data: subscriptionRow, error: insertError } = await supabase
+      .from("shop_subscriptions")
+      .insert({
+        shop_id: shopId,
+        plan_id: plan.plan_id,
+        amount: amount.toFixed(2),
+        currency: "INR",
+        duration_months: durationMonths,
+        payment_status: "PENDING",
+        payment_environment: environment,
+        started_at: null,
+        expires_at: null,
+      })
+      .select("subscription_id, shop_id, plan_id, amount, duration_months, payment_status, payment_environment, created_at")
+      .single();
+
+    if (insertError) {
+      throw new Error(`Failed to insert shop_subscriptions row: ${insertError.message}`);
+    }
+
+    insertedSubscriptionId = subscriptionRow.subscription_id;
+
+    const cashfreeOrderId =
+      `Q2PSUB_${String(insertedSubscriptionId).replace(/-/g, "")}`;
+
+    const phone = String(shop.whatsapp_number || "").replace(/\D/g, "");
+    if (phone.length < 10) {
+      throw new Error("Shop WhatsApp number must contain at least 10 digits for Cashfree.");
+    }
+
+    const customerId =
+      `Q2P${String(shop.shop_id).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 35)}`;
+
+    const payload = {
+      order_id: cashfreeOrderId,
+      order_amount: Number(amount.toFixed(2)),
+      order_currency: "INR",
+      customer_details: {
+        customer_id: customerId,
+        customer_name: String(shop.owner_name || shop.shop_name || "Quick2Print Shop").slice(0, 100),
+        customer_email: shop.email || "support@quick2print.in",
+        customer_phone: phone.slice(-10),
+      },
+      order_meta: {
+        return_url: subscriptionReturnUrl(insertedSubscriptionId, shopId),
+      },
+      order_note: `Quick2Print subscription: ${String(plan.name || plan.plan_id).slice(0, 200)}`,
+    };
+
+    let cashfreeResponse;
+    try {
+      cashfreeResponse = await axios.post(`${apiUrl}/orders`, payload, {
+        headers,
+        timeout: 20000,
+      });
+    } catch (cashfreeError) {
+      const detail =
+        cashfreeError.response?.data?.message ||
+        cashfreeError.response?.data?.message_code ||
+        cashfreeError.response?.data?.type ||
+        cashfreeError.message;
+      throw new Error(`Cashfree order creation failed: ${detail}`);
+    }
+
+    const cashfreeOrder = cashfreeResponse.data || {};
+    if (!cashfreeOrder.payment_session_id || !cashfreeOrder.order_id) {
+      throw new Error("Cashfree response did not include order_id and payment_session_id.");
+    }
+
+    const { error: updateError } = await supabase
+      .from("shop_subscriptions")
+      .update({
+        cashfree_order_id: cashfreeOrder.order_id,
+        cashfree_payment_session_id: cashfreeOrder.payment_session_id,
+        payment_status: "PENDING",
+        payment_environment: environment,
+        payment_error_message: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("subscription_id", insertedSubscriptionId)
+      .eq("shop_id", shopId);
+
+    if (updateError) {
+      throw new Error(`Cashfree order was created, but subscription update failed: ${updateError.message}`);
+    }
+
+    console.log("[Q2P subscription] Cashfree order created", {
+      shopId,
+      planId,
+      subscriptionId: insertedSubscriptionId,
+      cashfreeOrderId: cashfreeOrder.order_id,
+      environment,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Subscription payment created.",
+      data: {
+        ...subscriptionRow,
+        cashfree_order_id: cashfreeOrder.order_id,
+        cashfree_payment_session_id: cashfreeOrder.payment_session_id,
+        payment_environment: environment,
+        plan_name: plan.name,
+        shop_name: shop.shop_name,
+      },
+    });
+  } catch (error) {
+    console.error("[Q2P subscription] Create failed:", error.response?.data || error.message);
+
+    // Keep a traceable failed row instead of leaving it looking payable.
+    if (insertedSubscriptionId) {
+      const { error: statusError } = await supabase
+        .from("shop_subscriptions")
+        .update({
+          payment_status: "FAILED",
+          payment_error_message: String(error.message || "Subscription creation failed.").slice(0, 1000),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("subscription_id", insertedSubscriptionId);
+
+      if (statusError) {
+        console.error("[Q2P subscription] Could not save creation error:", statusError.message);
+      }
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Unable to create subscription payment.",
+    });
+  }
+});
+
+// ==========================================
+// SUBSCRIPTION API 2: GET SUBSCRIPTION FOR CHECKOUT / RECEIPT
+// GET /api/subscription/:subscriptionId?shop_id=...
+// ==========================================
+
+app.get("/api/subscription/:subscriptionId", async (req, res) => {
+  try {
+    const subscriptionId = String(req.params.subscriptionId || "").trim();
+    const shopId = String(req.query.shop_id || req.query.shopId || "").trim();
+
+    if (!subscriptionId) {
+      return res.status(400).json({ success: false, message: "Subscription ID is required." });
+    }
+
+    let query = supabase
+      .from("shop_subscriptions")
+      .select(`
+        subscription_id,
+        shop_id,
+        plan_id,
+        amount,
+        currency,
+        duration_months,
+        cashfree_order_id,
+        cashfree_payment_session_id,
+        cashfree_payment_id,
+        payment_status,
+        payment_method,
+        payment_environment,
+        payment_error_message,
+        created_at,
+        updated_at,
+        started_at,
+        expires_at
+      `)
+      .eq("subscription_id", subscriptionId);
+
+    if (shopId) query = query.eq("shop_id", shopId);
+
+    const { data: subscriptionRow, error } = await query.maybeSingle();
+    if (error) throw new Error(`Failed to load subscription: ${error.message}`);
+    if (!subscriptionRow) {
+      return res.status(404).json({ success: false, message: "Subscription not found for this shop." });
+    }
+
+    const [{ data: shop, error: shopError }, { data: plan, error: planError }] =
+      await Promise.all([
+        supabase
+          .from("shops")
+          .select("shop_id, shop_name, status, plan_id, subscription_status, plan_expires_at, subscription_start, subscription_end")
+          .eq("shop_id", subscriptionRow.shop_id)
+          .maybeSingle(),
+        supabase
+          .from("plans")
+          .select("plan_id, name, price_inr, duration_months")
+          .eq("plan_id", subscriptionRow.plan_id)
+          .maybeSingle(),
+      ]);
+
+    if (shopError) throw new Error(`Failed to load shop details: ${shopError.message}`);
+    if (planError) throw new Error(`Failed to load plan details: ${planError.message}`);
+
+    return res.json({
+      success: true,
+      data: {
+        ...subscriptionRow,
+        shop_name: shop?.shop_name || null,
+        shop_status: shop?.status || null,
+        shop_plan_id: shop?.plan_id || null,
+        subscription_status: shop?.subscription_status || null,
+        plan_expires_at: shop?.plan_expires_at || null,
+        subscription_start: shop?.subscription_start || null,
+        subscription_end: shop?.subscription_end || null,
+        plan_name: plan?.name || subscriptionRow.plan_id,
+        plan_price_inr: plan?.price_inr ?? subscriptionRow.amount,
+      },
+    });
+  } catch (error) {
+    console.error("[Q2P subscription] Load failed:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Unable to load subscription.",
+    });
+  }
+});
+
+// ==========================================
+// SUBSCRIPTION API 3: VERIFY CASHFREE PAYMENT
+// POST /api/subscription/verify { subscriptionId, shopId }
+// Only Cashfree's server response can activate a subscription.
+// ==========================================
+
+app.post("/api/subscription/verify", async (req, res) => {
+  try {
+    const subscriptionId = String(req.body?.subscriptionId || req.body?.subscription_id || "").trim();
+    const shopId = String(req.body?.shopId || req.body?.shop_id || "").trim();
+
+    if (!subscriptionId || !shopId) {
+      return res.status(400).json({
+        success: false,
+        message: "subscriptionId and shopId are required.",
+      });
+    }
+
+    const { data: subscriptionRow, error: subscriptionError } = await supabase
+      .from("shop_subscriptions")
+      .select(`
+        subscription_id, shop_id, plan_id, amount, currency, duration_months,
+        cashfree_order_id, cashfree_payment_id, payment_status,
+        payment_environment, started_at, expires_at
+      `)
+      .eq("subscription_id", subscriptionId)
+      .eq("shop_id", shopId)
+      .maybeSingle();
+
+    if (subscriptionError) throw new Error(`Failed to load subscription: ${subscriptionError.message}`);
+    if (!subscriptionRow) {
+      return res.status(404).json({ success: false, message: "Subscription not found for this shop." });
+    }
+
+    if (String(subscriptionRow.payment_status).toUpperCase() === "PAID") {
+      return res.json({ success: true, message: "Subscription is already paid.", data: subscriptionRow });
+    }
+
+    if (!subscriptionRow.cashfree_order_id) {
+      return res.status(409).json({
+        success: false,
+        message: "Cashfree order ID is missing. The subscription order was not created successfully.",
+        data: subscriptionRow,
+      });
+    }
+
+    const { apiUrl, headers } = await getSubscriptionShop(shopId);
+
+    let cashfreeOrderResponse;
+    try {
+      cashfreeOrderResponse = await axios.get(
+        `${apiUrl}/orders/${encodeURIComponent(subscriptionRow.cashfree_order_id)}`,
+        { headers, timeout: 20000 }
+      );
+    } catch (cashfreeError) {
+      const detail =
+        cashfreeError.response?.data?.message ||
+        cashfreeError.response?.data?.message_code ||
+        cashfreeError.message;
+      throw new Error(`Cashfree verification request failed: ${detail}`);
+    }
+
+    const cashfreeOrder = cashfreeOrderResponse.data || {};
+    const cashfreeStatus = String(cashfreeOrder.order_status || "").toUpperCase();
+    const cashfreeAmount = Number(cashfreeOrder.order_amount);
+    const expectedAmount = Number(subscriptionRow.amount);
+
+    if (cashfreeStatus === "PAID" &&
+        (!Number.isFinite(cashfreeAmount) || Math.abs(cashfreeAmount - expectedAmount) > 0.009)) {
+      return res.status(409).json({
+        success: false,
+        message: "Cashfree amount does not match the subscription amount. Contact support.",
+        error: { code: "PAYMENT_AMOUNT_MISMATCH" },
+      });
+    }
+
+    let paymentData = null;
+    if (cashfreeStatus === "PAID") {
+      try {
+        const paymentResponse = await axios.get(
+          `${apiUrl}/orders/${encodeURIComponent(subscriptionRow.cashfree_order_id)}/payments`,
+          { headers, timeout: 20000 }
+        );
+        const payments = Array.isArray(paymentResponse.data) ? paymentResponse.data : [];
+        paymentData =
+          payments.find((p) => String(p.payment_status || "").toUpperCase() === "SUCCESS") ||
+          payments[payments.length - 1] ||
+          null;
+      } catch (paymentError) {
+        // Order status + amount are verified directly with Cashfree; payment detail is optional.
+        console.warn("[Q2P subscription] Could not fetch payment detail:", paymentError.response?.data || paymentError.message);
+      }
+    }
+
+    if (cashfreeStatus !== "PAID") {
+      const mappedStatus =
+        cashfreeStatus === "EXPIRED" ? "EXPIRED" :
+        cashfreeStatus === "FAILED" ? "FAILED" : "PENDING";
+
+      const updateData = {
+        payment_status: mappedStatus,
+        updated_at: new Date().toISOString(),
+      };
+      if (mappedStatus === "FAILED") {
+        updateData.payment_error_message =
+          String(cashfreeOrder.order_status || "Payment failed").slice(0, 1000);
+      }
+
+      const { data: updated, error: updateError } = await supabase
+        .from("shop_subscriptions")
+        .update(updateData)
+        .eq("subscription_id", subscriptionId)
+        .eq("shop_id", shopId)
+        .select("subscription_id, shop_id, plan_id, amount, currency, duration_months, cashfree_order_id, cashfree_payment_id, payment_status, payment_environment, started_at, expires_at")
+        .single();
+
+      if (updateError) throw new Error(`Failed to save payment status: ${updateError.message}`);
+
+      return res.json({
+        success: true,
+        message: `Cashfree payment status: ${mappedStatus}.`,
+        data: updated,
+      });
+    }
+
+    const now = new Date();
+    const expiresAt = addMonths(now, Number(subscriptionRow.duration_months));
+    const paymentId = paymentData?.cf_payment_id != null
+      ? String(paymentData.cf_payment_id)
+      : subscriptionRow.cashfree_payment_id || null;
+
+    const paymentMethod = paymentData?.payment_method
+      ? (typeof paymentData.payment_method === "string"
+          ? paymentData.payment_method
+          : JSON.stringify(paymentData.payment_method))
+      : null;
+
+    // Mark subscription paid first. Do not activate the shop if this DB update fails.
+    const { data: paidSubscription, error: paidError } = await supabase
+      .from("shop_subscriptions")
+      .update({
+        payment_status: "PAID",
+        cashfree_payment_id: paymentId,
+        started_at: now.toISOString(),
+        expires_at: expiresAt.toISOString(),
+        payment_method: paymentMethod,
+        payment_error_message: null,
+        updated_at: now.toISOString(),
+      })
+      .eq("subscription_id", subscriptionId)
+      .eq("shop_id", shopId)
+      .select("subscription_id, shop_id, plan_id, amount, currency, duration_months, cashfree_order_id, cashfree_payment_session_id, cashfree_payment_id, payment_status, payment_environment, payment_method, payment_error_message, created_at, updated_at, started_at, expires_at")
+      .single();
+
+    if (paidError) throw new Error(`Cashfree confirmed payment, but saving subscription failed: ${paidError.message}`);
+
+    // Activate the shop only after the successful payment is saved.
+    const { error: shopUpdateError } = await supabase
+      .from("shops")
+      .update({
+        plan_id: subscriptionRow.plan_id,
+        plan_expires_at: expiresAt.toISOString(),
+        subscription_status: "active",
+        subscription_start: now.toISOString(),
+        subscription_end: expiresAt.toISOString(),
+        updated_at: now.toISOString(),
+      })
+      .eq("shop_id", shopId);
+
+    if (shopUpdateError) {
+      console.error("[Q2P subscription] Payment is PAID but shop activation update failed:", shopUpdateError.message);
+      return res.status(500).json({
+        success: false,
+        message: "Payment was confirmed and saved, but shop activation failed. Contact support; do not pay again.",
+        data: paidSubscription,
+      });
+    }
+
+    console.log("[Q2P subscription] Payment verified and shop activated", {
+      shopId,
+      subscriptionId,
+      cashfreeOrderId: subscriptionRow.cashfree_order_id,
+      paymentId,
+      expiresAt: expiresAt.toISOString(),
+    });
+
+    return res.json({
+      success: true,
+      message: "Payment verified and subscription activated.",
+      data: paidSubscription,
+    });
+  } catch (error) {
+    console.error("[Q2P subscription] Verification failed:", error.response?.data || error.message);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Payment verification failed.",
+    });
+  }
+});
+
+
 // ==========================================
 // API 4: HEALTH CHECK
 // ==========================================
