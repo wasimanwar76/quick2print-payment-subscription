@@ -16,10 +16,10 @@ app.use(express.json({ limit: "2mb" }));
 
 const PORT = Number(process.env.PORT || 5000);
 
-const SUPABASE_URL = "https://gepkipszweqhftwaejbu.supabase.co";
-
-const SUPABASE_SERVICE_ROLE_KEY =
-  "sb_publishable_forPZqB40NrPCFGQsdqeZw_4QTxOgBH";
+const SUPABASE_URL = text(process.env.SUPABASE_URL);
+const SUPABASE_SERVICE_ROLE_KEY = text(
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY
+);
 
 const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
 
@@ -33,7 +33,9 @@ const RETURN_URL =
   "https://www\.quick2print.in/subscription-payment-success.html";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY)
-  throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  throw new Error(
+    "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. Use the Supabase secret/service_role key on the server; never use a publishable/anon key for this backend."
+  );
 
 if (!CASHFREE_APP_ID || !CASHFREE_SECRET_KEY)
   throw new Error("Missing CASHFREE_APP_ID or CASHFREE_SECRET_KEY");
