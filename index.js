@@ -16,10 +16,10 @@ app.use(express.json({ limit: "2mb" }));
 
 const PORT = Number(process.env.PORT || 5000);
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_URL = "https://gepkipszweqhftwaejbu.supabase.co";
 
 const SUPABASE_SERVICE_ROLE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
+  "sb_publishable_forPZqB40NrPCFGQsdqeZw_4QTxOgBH";
 
 const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
 
