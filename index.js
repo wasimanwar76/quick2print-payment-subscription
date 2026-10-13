@@ -93,7 +93,7 @@ async function getShopCashfreeConfig(shopId) {
     throw new Error("Cashfree Secret Key is not configured for this shop.");
   }
 
-  const environment = String(shop.cashfree_env || "SANDBOX").toUpperCase();
+  const environment = String("SANDBOX").toUpperCase();
 
   if (!["SANDBOX", "PRODUCTION"].includes(environment)) {
     throw new Error("Invalid Cashfree environment. Use SANDBOX or PRODUCTION.");
@@ -106,8 +106,8 @@ async function getShopCashfreeConfig(shopId) {
 
   const headers = {
     "Content-Type": "application/json",
-    "x-client-id": shop.TEST107918248d19ef74e6e8b10f3aa042819701,
-    "x-client-secret": shop.cashfree_secret_key,
+    "x-client-id": 'TEST107918248d19ef74e6e8b10f3aa042819701',
+    "x-client-secret": 'cashfree_secret_key',
     "x-api-version": "2022-09-01",
   };
 
