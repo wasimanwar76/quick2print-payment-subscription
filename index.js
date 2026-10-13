@@ -106,7 +106,7 @@ async function getShopCashfreeConfig(shopId) {
 
   const headers = {
     "Content-Type": "application/json",
-    "x-client-id": shop.cashfree_app_id,
+    "x-client-id": shop.TEST107918248d19ef74e6e8b10f3aa042819701,
     "x-client-secret": shop.cashfree_secret_key,
     "x-api-version": "2022-09-01",
   };
