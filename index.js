@@ -27,7 +27,7 @@ const CASHFREE_ENV = String(
 ).toUpperCase();
 
 const RETURN_URL =
-  "https://wwww.quick2print.in/subscription-payment-success.html";
+  "https://www.quick2print.in/subscription-payment-success.html";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY)
   throw new Error(
@@ -100,7 +100,9 @@ async function shop(shopId) {
 
     .from("shops")
 
-    .select("shop_id,owner_name,shop_name,whatsapp_number,email,status")
+    .select(
+      "shop_id,owner_name,shop_name,whatsapp_number,email,status,plan_id,plan_expires_at,subscription_status,subscription_start,subscription_end",
+    )
 
     .eq("shop_id", shopId)
 
@@ -164,6 +166,82 @@ async function cf(path, options = {}) {
 
   return body;
 }
+
+// Public status check used by the homepage subscription modal. Never trusts browser-side status.
+app.post("/api/subscription/status", async (req, res) => {
+  try {
+    const shopId = text(req.body?.shopId);
+    if (!shopId)
+      return fail(res, "Please enter your Shop ID.", "SHOP_ID_REQUIRED");
+    const s = await shop(shopId);
+    if (!s)
+      return fail(
+        res,
+        "Shop ID not found. Check the ID and try again.",
+        "SHOP_NOT_FOUND",
+        404,
+      );
+    if (String(s.status || "").toLowerCase() === "suspended")
+      return fail(
+        res,
+        "This shop is suspended. Please contact Quick2Print support.",
+        "SHOP_SUSPENDED",
+        403,
+      );
+
+    const now = new Date();
+    const { data: rows, error } = await supabase
+      .from("shop_subscriptions")
+      .select(
+        "subscription_id,shop_id,plan_id,amount,duration_months,payment_status,started_at,expires_at,cashfree_order_id",
+      )
+      .eq("shop_id", shopId)
+      .eq("payment_status", "PAID")
+      .order("expires_at", { ascending: false, nullsFirst: false })
+      .limit(10);
+    if (error) throw error;
+    const active = (rows || []).find(
+      (row) => row.expires_at && new Date(row.expires_at) > now,
+    );
+    const shopExpiry = s.plan_expires_at ? new Date(s.plan_expires_at) : null;
+    const shopActive =
+      String(s.subscription_status || "").toLowerCase() === "active" &&
+      shopExpiry &&
+      shopExpiry > now;
+    if (active || shopActive) {
+      const current = active || {
+        plan_id: s.plan_id,
+        expires_at: s.plan_expires_at,
+      };
+      return ok(res, "This shop already has an active subscription.", {
+        active: true,
+        shop_id: shopId,
+        shop_name: s.shop_name || "Quick2Print Shop",
+        plan_id: current.plan_id || s.plan_id || "—",
+        expires_at: current.expires_at || s.plan_expires_at,
+      });
+    }
+    return ok(
+      res,
+      "No active paid subscription found. You can renew your selected plan.",
+      {
+        active: false,
+        shop_id: shopId,
+        shop_name: s.shop_name || "Quick2Print Shop",
+        current_plan_id: s.plan_id || null,
+        status: s.subscription_status || s.status || "inactive",
+      },
+    );
+  } catch (e) {
+    console.error("[SUBSCRIPTION STATUS]", e);
+    return fail(
+      res,
+      "Unable to check subscription status right now. Please try again.",
+      "SUBSCRIPTION_STATUS_FAILED",
+      500,
+    );
+  }
+});
 
 app.post("/api/subscription/create", async (req, res) => {
   try {
@@ -252,7 +330,7 @@ app.post("/api/subscription/create", async (req, res) => {
 
     const subscriptionId = crypto.randomUUID();
 
-    const orderId = `Q2P_SUB\_${Date.now()}\_${crypto.randomBytes(5).toString("hex")}`;
+    const orderId = `Q2P_SUB_${Date.now()}_${crypto.randomBytes(5).toString("hex")}`;
 
     const { error: insertError } = await supabase
 
