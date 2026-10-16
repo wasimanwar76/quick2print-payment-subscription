@@ -16,8 +16,11 @@ app.use(express.json({ limit: "2mb" }));
 
 const PORT = Number(process.env.PORT || 5000);
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_KEY;
+const SUPABASE_URL = String(process.env.SUPABASE_URL || "")
+  .trim()
+  .replace(/\/+$/, "");
+const SUPABASE_SERVICE_ROLE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
 const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
 
 const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
@@ -39,6 +42,18 @@ if (!CASHFREE_APP_ID || !CASHFREE_SECRET_KEY)
 
 if (!["SANDBOX", "PRODUCTION"].includes(CASHFREE_ENV))
   throw new Error("CASHFREE_ENV must be SANDBOX or PRODUCTION");
+
+let SUPABASE_PROJECT_HOST = "invalid-SUPABASE_URL";
+try {
+  SUPABASE_PROJECT_HOST = new URL(SUPABASE_URL).hostname;
+} catch {
+  throw new Error("SUPABASE_URL must be a valid Supabase project URL.");
+}
+
+console.info(
+  "[CONFIG] Subscription payment server Supabase project:",
+  SUPABASE_PROJECT_HOST,
+);
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: {
@@ -529,25 +544,49 @@ app.get("/api/subscription/:subscriptionId", async (req, res) => {
     }
 
     if (!sub) {
-      // Do not fall back to another subscription: that could charge the
-      // customer for a different order.
+      // Diagnostic only: never substitute a different subscription/order.
+      // Helps distinguish a wrong Supabase project from a stale/invalid link.
+      let shopHasSubscriptions = false;
+      try {
+        const { data: shopRows, error: diagnosticError } = await supabase
+          .from("shop_subscriptions")
+          .select("subscription_id")
+          .eq("shop_id", shopId)
+          .limit(1);
+
+        if (diagnosticError) {
+          console.warn("[GET SUBSCRIPTION] Diagnostic query failed", {
+            code: diagnosticError.code,
+            message: diagnosticError.message,
+          });
+        } else {
+          shopHasSubscriptions = Array.isArray(shopRows) && shopRows.length > 0;
+        }
+      } catch (diagnosticError) {
+        console.warn(
+          "[GET SUBSCRIPTION] Diagnostic check failed",
+          diagnosticError.message,
+        );
+      }
+
       console.warn("[GET SUBSCRIPTION] ID not found in configured project", {
         subscriptionId,
         shopId,
-        supabaseProject: (() => {
-          try {
-            return new URL(SUPABASE_URL).hostname;
-          } catch {
-            return "invalid-SUPABASE_URL";
-          }
-        })(),
+        supabaseProject: SUPABASE_PROJECT_HOST,
+        shopHasSubscriptions,
       });
 
       return fail(
         res,
-        "This subscription ID was not found in the payment server's Supabase project. Start a new subscription from the dashboard, or verify the server's SUPABASE_URL.",
+        shopHasSubscriptions
+          ? "This subscription ID is not present for the requested shop in the payment server's Supabase project. Confirm that the dashboard creates subscriptions using this same payment server and Supabase project, then start a new subscription if needed."
+          : "No subscription record was found in the payment server's Supabase project for this Shop ID. Check that the dashboard and payment server use the same SUPABASE_URL and service-role key, then start a new subscription.",
         "SUBSCRIPTION_ID_NOT_FOUND",
         404,
+        {
+          supabaseProject: SUPABASE_PROJECT_HOST,
+          shopHasSubscriptions,
+        },
       );
     }
 
