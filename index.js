@@ -16,6 +16,18 @@ app.use(express.json({ limit: "2mb" }));
 
 const PORT = Number(process.env.PORT || 5000);
 
+const cors = require("cors");
+
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  }),
+);
+
+app.use(express.json());
+
 const SUPABASE_URL = String(process.env.SUPABASE_URL || "")
   .trim()
   .replace(/\/+$/, "");
