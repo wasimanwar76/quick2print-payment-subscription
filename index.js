@@ -194,10 +194,16 @@ async function cf(path, options = {}) {
 
   if (!response.ok) {
     const e = new Error(
-      body?.message || body?.message_text || "Cashfree request failed.",
+      body?.message ||
+        body?.message_text ||
+        body?.error_description ||
+        body?.type ||
+        `Cashfree request failed (HTTP ${response.status}).`,
     );
 
     e.status = response.status;
+    e.cashfreeCode = body?.code || body?.type || null;
+    e.cashfreeDetails = body;
 
     throw e;
   }
@@ -408,7 +414,7 @@ app.post("/api/subscription/create", async (req, res) => {
 
     const subscriptionId = crypto.randomUUID();
 
-    const orderId = `Q2P_SUB\_${Date.now()}\_${crypto.randomBytes(5).toString("hex")}`;
+    const orderId = `Q2P_SUB_${Date.now()}_${crypto.randomBytes(5).toString("hex")}`;
 
     const { error: insertError } = await supabase
 
@@ -446,6 +452,7 @@ app.post("/api/subscription/create", async (req, res) => {
           order_amount: amount,
 
           order_currency: "INR",
+
           customer_details: {
             customer_id: `SHOP_${String(shopId).replace(/[^a-zA-Z0-9_-]/g, "")}`,
 
@@ -540,7 +547,12 @@ app.post("/api/subscription/create", async (req, res) => {
       throw e;
     }
   } catch (e) {
-    console.error("[CREATE SUBSCRIPTION]", e);
+    console.error("[CREATE SUBSCRIPTION]", {
+      message: e.message,
+      status: e.status,
+      cashfreeCode: e.cashfreeCode,
+      cashfreeDetails: e.cashfreeDetails,
+    });
 
     return fail(
       res,
