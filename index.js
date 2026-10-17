@@ -446,9 +446,8 @@ app.post("/api/subscription/create", async (req, res) => {
           order_amount: amount,
 
           order_currency: "INR",
-
           customer_details: {
-            customer_id: `SHOP\\\_${shopId}`,
+            customer_id: `SHOP_${String(shopId).replace(/[^a-zA-Z0-9_-]/g, "")}`,
 
             customer_name: s.owner_name || s.shop_name || "Quick2Print Shop",
 
