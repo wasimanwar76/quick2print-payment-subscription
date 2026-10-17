@@ -10,12 +10,6 @@ const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
 
-app.use(cors());
-
-app.use(express.json({ limit: "2mb" }));
-
-const PORT = Number(process.env.PORT || 5000);
-
 app.use(
   cors({
     origin: "*",
@@ -24,13 +18,30 @@ app.use(
   }),
 );
 
+app.use(express.json({ limit: "2mb" }));
+
+const PORT = Number(process.env.PORT || 5000);
+
+app.use(
+  cors({
+    origin: "*",
+
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+
+    allowedHeaders: ["Content-Type", "Authorization"],
+  }),
+);
+
 app.use(express.json());
 
 const SUPABASE_URL = String(process.env.SUPABASE_URL || "")
   .trim()
+
   .replace(/\/+$/, "");
+
 const SUPABASE_SERVICE_ROLE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
+
 const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
 
 const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
@@ -40,7 +51,7 @@ const CASHFREE_ENV = String(
 ).toUpperCase();
 
 const RETURN_URL =
-  "https://www.quick2print.in/subscription-payment-success.html";
+  "https\://www.quick2print.in/subscription-payment-success.html";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY)
   throw new Error(
@@ -54,6 +65,7 @@ if (!["SANDBOX", "PRODUCTION"].includes(CASHFREE_ENV))
   throw new Error("CASHFREE_ENV must be SANDBOX or PRODUCTION");
 
 let SUPABASE_PROJECT_HOST = "invalid-SUPABASE_URL";
+
 try {
   SUPABASE_PROJECT_HOST = new URL(SUPABASE_URL).hostname;
 } catch {
@@ -62,6 +74,7 @@ try {
 
 console.info(
   "[CONFIG] Subscription payment server Supabase project:",
+
   SUPABASE_PROJECT_HOST,
 );
 
@@ -193,76 +206,116 @@ async function cf(path, options = {}) {
 }
 
 // Public status check used by the homepage subscription modal. Never trusts browser-side status.
+
 app.post("/api/subscription/status", async (req, res) => {
   try {
     const shopId = text(req.body?.shopId);
+
     if (!shopId)
       return fail(res, "Please enter your Shop ID.", "SHOP_ID_REQUIRED");
+
     const s = await shop(shopId);
+
     if (!s)
       return fail(
         res,
+
         "Shop ID not found. Check the ID and try again.",
+
         "SHOP_NOT_FOUND",
+
         404,
       );
+
     if (String(s.status || "").toLowerCase() === "suspended")
       return fail(
         res,
+
         "This shop is suspended. Please contact Quick2Print support.",
+
         "SHOP_SUSPENDED",
+
         403,
       );
 
     const now = new Date();
+
     const { data: rows, error } = await supabase
+
       .from("shop_subscriptions")
+
       .select(
         "subscription_id,shop_id,plan_id,amount,duration_months,payment_status,started_at,expires_at,cashfree_order_id",
       )
+
       .eq("shop_id", shopId)
+
       .eq("payment_status", "PAID")
+
       .order("expires_at", { ascending: false, nullsFirst: false })
+
       .limit(10);
+
     if (error) throw error;
+
     const active = (rows || []).find(
       (row) => row.expires_at && new Date(row.expires_at) > now,
     );
+
     const shopExpiry = s.plan_expires_at ? new Date(s.plan_expires_at) : null;
+
     const shopActive =
       String(s.subscription_status || "").toLowerCase() === "active" &&
       shopExpiry &&
       shopExpiry > now;
+
     if (active || shopActive) {
       const current = active || {
         plan_id: s.plan_id,
+
         expires_at: s.plan_expires_at,
       };
+
       return ok(res, "This shop already has an active subscription.", {
         active: true,
+
         shop_id: shopId,
+
         shop_name: s.shop_name || "Quick2Print Shop",
+
         plan_id: current.plan_id || s.plan_id || "—",
+
         expires_at: current.expires_at || s.plan_expires_at,
       });
     }
+
     return ok(
       res,
+
       "No active paid subscription found. You can renew your selected plan.",
+
       {
         active: false,
+
         shop_id: shopId,
+
         shop_name: s.shop_name || "Quick2Print Shop",
+
         current_plan_id: s.plan_id || null,
+
         status: s.subscription_status || s.status || "inactive",
       },
     );
   } catch (e) {
     console.error("[SUBSCRIPTION STATUS]", e);
+
     return fail(
       res,
+
       "Unable to check subscription status right now. Please try again.",
+
       "SUBSCRIPTION_STATUS_FAILED",
+
       500,
     );
   }
@@ -355,7 +408,7 @@ app.post("/api/subscription/create", async (req, res) => {
 
     const subscriptionId = crypto.randomUUID();
 
-    const orderId = `Q2P_SUB_${Date.now()}_${crypto.randomBytes(5).toString("hex")}`;
+    const orderId = `Q2P_SUB\_${Date.now()}\_${crypto.randomBytes(5).toString("hex")}`;
 
     const { error: insertError } = await supabase
 
@@ -395,7 +448,7 @@ app.post("/api/subscription/create", async (req, res) => {
           order_currency: "INR",
 
           customer_details: {
-            customer_id: `SHOP\_${shopId}`,
+            customer_id: `SHOP\\\_${shopId}`,
 
             customer_name: s.owner_name || s.shop_name || "Quick2Print Shop",
 
@@ -506,67 +559,105 @@ app.post("/api/subscription/create", async (req, res) => {
 app.get("/api/subscription/:subscriptionId", async (req, res) => {
   try {
     const subscriptionId = text(req.params.subscriptionId);
+
     const shopId = text(req.query.shop_id);
 
     if (!subscriptionId || !shopId) {
       return fail(
         res,
+
         "Subscription ID and Shop ID are required.",
+
         "MISSING_SUBSCRIPTION_OR_SHOP_ID",
+
         400,
       );
     }
 
     // First find by subscription ID alone. This distinguishes a missing
+
     // subscription from a subscription that belongs to a different shop.
+
     const { data: sub, error } = await supabase
+
       .from("shop_subscriptions")
+
       .select(
         `
+
         subscription_id,
+
         shop_id,
+
         plan_id,
+
         amount,
+
         currency,
+
         duration_months,
+
         cashfree_order_id,
+
         cashfree_payment_session_id,
+
         payment_status,
+
         payment_environment,
+
         payment_method,
+
         cashfree_payment_id,
+
         started_at,
+
         expires_at,
+
         created_at,
+
         payment_error_message
+
       `,
       )
+
       .eq("subscription_id", subscriptionId)
+
       .maybeSingle();
 
     if (error) {
       console.error("[GET SUBSCRIPTION] Supabase lookup failed", {
         code: error.code,
+
         message: error.message,
+
         subscriptionId,
       });
+
       throw error;
     }
 
     if (!sub) {
       // Diagnostic only: never substitute a different subscription/order.
+
       // Helps distinguish a wrong Supabase project from a stale/invalid link.
+
       let shopHasSubscriptions = false;
+
       try {
         const { data: shopRows, error: diagnosticError } = await supabase
+
           .from("shop_subscriptions")
+
           .select("subscription_id")
+
           .eq("shop_id", shopId)
+
           .limit(1);
 
         if (diagnosticError) {
           console.warn("[GET SUBSCRIPTION] Diagnostic query failed", {
             code: diagnosticError.code,
+
             message: diagnosticError.message,
           });
         } else {
@@ -575,26 +666,35 @@ app.get("/api/subscription/:subscriptionId", async (req, res) => {
       } catch (diagnosticError) {
         console.warn(
           "[GET SUBSCRIPTION] Diagnostic check failed",
+
           diagnosticError.message,
         );
       }
 
       console.warn("[GET SUBSCRIPTION] ID not found in configured project", {
         subscriptionId,
+
         shopId,
+
         supabaseProject: SUPABASE_PROJECT_HOST,
+
         shopHasSubscriptions,
       });
 
       return fail(
         res,
+
         shopHasSubscriptions
           ? "This subscription ID is not present for the requested shop in the payment server's Supabase project. Confirm that the dashboard creates subscriptions using this same payment server and Supabase project, then start a new subscription if needed."
           : "No subscription record was found in the payment server's Supabase project for this Shop ID. Check that the dashboard and payment server use the same SUPABASE_URL and service-role key, then start a new subscription.",
+
         "SUBSCRIPTION_ID_NOT_FOUND",
+
         404,
+
         {
           supabaseProject: SUPABASE_PROJECT_HOST,
+
           shopHasSubscriptions,
         },
       );
@@ -603,38 +703,54 @@ app.get("/api/subscription/:subscriptionId", async (req, res) => {
     if (String(sub.shop_id) !== shopId) {
       console.warn("[GET SUBSCRIPTION] Shop ID mismatch", {
         subscriptionId,
+
         requestedShopId: shopId,
+
         actualShopId: sub.shop_id,
       });
 
       return fail(
         res,
+
         "This subscription belongs to a different shop. Return to the dashboard and start the correct subscription.",
+
         "SUBSCRIPTION_SHOP_MISMATCH",
+
         403,
       );
     }
 
     const { data: plan, error: planError } = await supabase
+
       .from("plans")
+
       .select("plan_id, name, price_inr, duration_months, duration_label")
+
       .eq("plan_id", sub.plan_id)
+
       .maybeSingle();
 
     if (planError) throw planError;
 
     const { data: shopData, error: shopError } = await supabase
+
       .from("shops")
+
       .select("shop_id, shop_name")
+
       .eq("shop_id", sub.shop_id)
+
       .maybeSingle();
 
     if (shopError) throw shopError;
 
     return ok(res, "Subscription details loaded.", {
       ...sub,
+
       plan_name: plan?.name || sub.plan_id,
+
       duration_label: plan?.duration_label || `${sub.duration_months} Months`,
+
       shop_name: shopData?.shop_name || "Quick2Print Shop",
     });
   } catch (error) {
@@ -642,8 +758,11 @@ app.get("/api/subscription/:subscriptionId", async (req, res) => {
 
     return fail(
       res,
+
       "Unable to load subscription details.",
+
       "SUBSCRIPTION_LOAD_FAILED",
+
       500,
     );
   }
@@ -677,7 +796,7 @@ app.post("/api/subscription/verify", async (req, res) => {
 
       .from("shop_subscriptions")
 
-      .select("\*")
+      .select("*")
 
       .eq("subscription_id", subscriptionId)
 
@@ -845,7 +964,7 @@ app.post("/api/subscription/verify", async (req, res) => {
 
       .neq("payment_status", "PAID")
 
-      .select("\*")
+      .select("*")
 
       .maybeSingle();
 
@@ -856,7 +975,7 @@ app.post("/api/subscription/verify", async (req, res) => {
 
         .from("shop_subscriptions")
 
-        .select("\*")
+        .select("*")
 
         .eq("subscription_id", subscriptionId)
 
