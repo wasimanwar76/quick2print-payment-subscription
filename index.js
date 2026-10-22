@@ -51,7 +51,7 @@ const CASHFREE_ENV = String(
 ).toUpperCase();
 
 const RETURN_URL =
-  "https\://www.quick2print.in/subscription-payment-success.html";
+  "https://www.quick2print.in/subscription-payment-success.html";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY)
   throw new Error(
