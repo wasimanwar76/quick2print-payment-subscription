@@ -47,7 +47,7 @@ const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
 const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
 
 const CASHFREE_ENV = String(
-  process.env.CASHFREE_ENV || "SANDBOX",
+  process.env.CASHFREE_ENV || "PRODUCTION",
 ).toUpperCase();
 
 const RETURN_URL =
