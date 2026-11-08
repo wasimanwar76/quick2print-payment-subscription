@@ -46,9 +46,7 @@ const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
 
 const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
 
-const CASHFREE_ENV = String(
-  process.env.CASHFREE_ENV || "SANDBOX",
-).toUpperCase();
+const CASHFREE_ENV = String("PRODUCTION");
 
 const RETURN_URL =
   "https://www.quick2print.in/subscription-payment-success.html";
@@ -86,10 +84,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   },
 });
 
-const CF_BASE =
-  CASHFREE_ENV === "PRODUCTION"
-    ? "https://api.cashfree.com/pg"
-    : "https://sandbox.cashfree.com/pg";
+const CF_BASE = "https://sandbox.cashfree.com/pg";
 
 const CF_HEADERS = {
   "Content-Type": "application/json",
