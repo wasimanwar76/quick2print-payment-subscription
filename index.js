@@ -13,9 +13,7 @@ const app = express();
 app.use(
   cors({
     origin: "*",
-
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-
     allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
@@ -23,6 +21,18 @@ app.use(
 app.use(express.json({ limit: "2mb" }));
 
 const PORT = Number(process.env.PORT || 5000);
+
+app.use(
+  cors({
+    origin: "*",
+
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+
+    allowedHeaders: ["Content-Type", "Authorization"],
+  }),
+);
+
+app.use(express.json());
 
 const SUPABASE_URL = String(process.env.SUPABASE_URL || "")
   .trim()
@@ -36,7 +46,7 @@ const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
 
 const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
 
-const CASHFREE_ENV = "PRODUCTION";
+const CASHFREE_ENV = String("PRODUCTION");
 
 const RETURN_URL =
   "https://www.quick2print.in/subscription-payment-success.html";
@@ -74,7 +84,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   },
 });
 
-const CF_BASE = "https://api.cashfree.com/pg";
+const CF_BASE = "https://sandbox.cashfree.com/pg";
 
 const CF_HEADERS = {
   "Content-Type": "application/json",
@@ -187,9 +197,7 @@ async function cf(path, options = {}) {
     );
 
     e.status = response.status;
-
     e.cashfreeCode = body?.code || body?.type || null;
-
     e.cashfreeDetails = body;
 
     throw e;
@@ -401,7 +409,7 @@ app.post("/api/subscription/create", async (req, res) => {
 
     const subscriptionId = crypto.randomUUID();
 
-    const orderId = `Q2P_SUB\_${Date.now()}\_${crypto.randomBytes(5).toString("hex")}`;
+    const orderId = `Q2P_SUB_${Date.now()}_${crypto.randomBytes(5).toString("hex")}`;
 
     const { error: insertError } = await supabase
 
@@ -441,7 +449,7 @@ app.post("/api/subscription/create", async (req, res) => {
           order_currency: "INR",
 
           customer_details: {
-            customer_id: `SHOP\_${String(shopId).replace(/[^a-zA-Z0-9\_-]/g, "")}`,
+            customer_id: `SHOP_${String(shopId).replace(/[^a-zA-Z0-9_-]/g, "")}`,
 
             customer_name: s.owner_name || s.shop_name || "Quick2Print Shop",
 
@@ -536,11 +544,8 @@ app.post("/api/subscription/create", async (req, res) => {
   } catch (e) {
     console.error("[CREATE SUBSCRIPTION]", {
       message: e.message,
-
       status: e.status,
-
       cashfreeCode: e.cashfreeCode,
-
       cashfreeDetails: e.cashfreeDetails,
     });
 
