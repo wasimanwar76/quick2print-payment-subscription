@@ -42,9 +42,9 @@ const SUPABASE_URL = String(process.env.SUPABASE_URL || "")
 const SUPABASE_SERVICE_ROLE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
 
-const CASHFREE_APP_ID = "1201530ddead671ebd2b5331ed30351021";
+const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
 
-const CASHFREE_SECRET_KEY = "cfsk_ma_prod_c89807c0bdae1217c67cbce1c6cf3051_78ab66dd";
+const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
 
 const CASHFREE_ENV = String(
   process.env.CASHFREE_ENV || "PRODUCTION",
