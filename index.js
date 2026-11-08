@@ -13,9 +13,7 @@ const app = express();
 app.use(
   cors({
     origin: "*",
-
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-
     allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
@@ -44,11 +42,13 @@ const SUPABASE_URL = String(process.env.SUPABASE_URL || "")
 const SUPABASE_SERVICE_ROLE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
 
-const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
+const CASHFREE_APP_ID = "1201530ddead671ebd2b5331ed30351021";
 
-const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
+const CASHFREE_SECRET_KEY = "cfsk_ma_prod_c89807c0bdae1217c67cbce1c6cf3051_78ab66dd";
 
-const CASHFREE_ENV = "PRODUCTION";
+const CASHFREE_ENV = String(
+  process.env.CASHFREE_ENV || "PRODUCTION",
+).toUpperCase();
 
 const RETURN_URL =
   "https://www.quick2print.in/subscription-payment-success.html";
@@ -60,6 +60,9 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY)
 
 if (!CASHFREE_APP_ID || !CASHFREE_SECRET_KEY)
   throw new Error("Missing CASHFREE_APP_ID or CASHFREE_SECRET_KEY");
+
+if (!["SANDBOX", "PRODUCTION"].includes(CASHFREE_ENV))
+  throw new Error("CASHFREE_ENV must be SANDBOX or PRODUCTION");
 
 let SUPABASE_PROJECT_HOST = "invalid-SUPABASE_URL";
 
@@ -83,7 +86,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   },
 });
 
-const CF_BASE = "https://api.cashfree.com/pg";
+const CF_BASE = CASHFREE_ENV === "https://api.cashfree.com/pg";
 
 const CF_HEADERS = {
   "Content-Type": "application/json",
@@ -196,9 +199,7 @@ async function cf(path, options = {}) {
     );
 
     e.status = response.status;
-
     e.cashfreeCode = body?.code || body?.type || null;
-
     e.cashfreeDetails = body;
 
     throw e;
@@ -545,11 +546,8 @@ app.post("/api/subscription/create", async (req, res) => {
   } catch (e) {
     console.error("[CREATE SUBSCRIPTION]", {
       message: e.message,
-
       status: e.status,
-
       cashfreeCode: e.cashfreeCode,
-
       cashfreeDetails: e.cashfreeDetails,
     });
 
