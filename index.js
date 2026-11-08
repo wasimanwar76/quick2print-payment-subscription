@@ -1,7 +1,6 @@
 require("dotenv").config();
 
 const express = require("express");
-const hello  ="";
 
 const cors = require("cors");
 
@@ -48,7 +47,7 @@ const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
 const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
 
 const CASHFREE_ENV = String(
-  process.env.CASHFREE_ENV || "PRODUCTION",
+  process.env.CASHFREE_ENV || "SANDBOX",
 ).toUpperCase();
 
 const RETURN_URL =
@@ -87,7 +86,10 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   },
 });
 
-const CF_BASE = CASHFREE_ENV === "https://api.cashfree.com/pg";
+const CF_BASE =
+  CASHFREE_ENV === "PRODUCTION"
+    ? "https://api.cashfree.com/pg"
+    : "https://sandbox.cashfree.com/pg";
 
 const CF_HEADERS = {
   "Content-Type": "application/json",
