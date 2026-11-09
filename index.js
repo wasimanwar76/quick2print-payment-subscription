@@ -22,18 +22,6 @@ app.use(express.json({ limit: "2mb" }));
 
 const PORT = Number(process.env.PORT || 5000);
 
-app.use(
-  cors({
-    origin: "*",
-
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-
-    allowedHeaders: ["Content-Type", "Authorization"],
-  }),
-);
-
-app.use(express.json());
-
 const SUPABASE_URL = String(process.env.SUPABASE_URL || "")
   .trim()
 
@@ -46,9 +34,11 @@ const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
 
 const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
 
-const CASHFREE_ENV = String(
-  process.env.CASHFREE_ENV || "SANDBOX",
-).toUpperCase();
+const CASHFREE_ENV = String(process.env.CASHFREE_ENV || "SANDBOX")
+  .trim()
+  .toUpperCase();
+
+const CASHFREE_API_VERSION = process.env.CASHFREE_API_VERSION || "2022-09-01";
 
 const RETURN_URL =
   "https://www.quick2print.in/subscription-payment-success.html";
@@ -98,7 +88,7 @@ const CF_HEADERS = {
 
   "x-client-secret": CASHFREE_SECRET_KEY,
 
-  "x-api-version": "2022-09-01",
+  "x-api-version": CASHFREE_API_VERSION,
 };
 
 const ok = (res, message, data = {}, status = 200) =>
@@ -479,24 +469,45 @@ app.post("/api/subscription/create", async (req, res) => {
         }),
       });
 
-      const sessionId = cfOrder?.payment_session_id;
+      const sessionId = text(cfOrder?.payment_session_id);
 
-      if (!sessionId)
-        throw new Error("Cashfree did not return a payment session ID.");
+      if (!sessionId) {
+        console.error("[CASHFREE CREATE ORDER] Missing payment_session_id", {
+          orderId,
+          environment: CASHFREE_ENV,
+          responseKeys: Object.keys(cfOrder || {}),
+          cashfreeOrderId: cfOrder?.order_id || null,
+          orderStatus: cfOrder?.order_status || null,
+        });
 
-      const { error: updateError } = await supabase
+        throw new Error(
+          "Cashfree did not return a valid payment session ID. Check that the production App ID and Secret Key belong to the same Cashfree account.",
+        );
+      }
 
+      if (cfOrder?.order_id && cfOrder.order_id !== orderId) {
+        throw new Error(
+          "Cashfree returned a different order ID. Payment session was not saved.",
+        );
+      }
+
+      const { data: savedSession, error: updateError } = await supabase
         .from("shop_subscriptions")
-
         .update({
           cashfree_payment_session_id: sessionId,
-
           updated_at: new Date().toISOString(),
         })
-
-        .eq("subscription_id", subscriptionId);
+        .eq("subscription_id", subscriptionId)
+        .select("subscription_id, cashfree_order_id")
+        .maybeSingle();
 
       if (updateError) throw updateError;
+
+      if (!savedSession) {
+        throw new Error(
+          "Payment session was created but could not be linked to the subscription record.",
+        );
+      }
 
       return ok(
         res,
@@ -827,6 +838,18 @@ app.post("/api/subscription/verify", async (req, res) => {
 
         404,
       );
+
+    if (
+      sub.payment_environment &&
+      String(sub.payment_environment).toUpperCase() !== CASHFREE_ENV
+    ) {
+      return fail(
+        res,
+        `This order was created in ${sub.payment_environment} mode, but the server is configured for ${CASHFREE_ENV}. Use the matching Cashfree environment.`,
+        "CASHFREE_ENVIRONMENT_MISMATCH",
+        409,
+      );
+    }
 
     if (sub.payment_status === "PAID") {
       return ok(
